@@ -1,0 +1,325 @@
+---
+title: "BANA482 Case 3: Time Series Forecasting"
+author: "Mohammed Baobaid - 202031137"
+date: "2026-02-18"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+# 0. Setup & Reproducibility
+
+## 0.1 Install Required Packages (Run Once)
+
+```{r install-packages, eval=FALSE}
+required_packages <- c(
+  "tidyverse",
+  "lubridate",
+  "forecast",
+  "tseries"
+)
+
+installed <- rownames(installed.packages())
+
+for (pkg in required_packages) {
+  if (!(pkg %in% installed)) {
+    install.packages(pkg)
+  }
+}
+```
+
+## 0.2 Load Libraries & Set Seed
+
+```{r load-libraries}
+SEED <- 202031137
+set.seed(SEED)
+
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(tseries)
+```
+
+# 1. Data Loading and Initial Inspection
+
+## 1.1 Load Dataset
+
+```{r load-data}
+
+file_path <- "../data/train.csv"
+
+if (!file.exists(file_path)) {
+  stop("File not found. Please check dataset path.")
+}
+
+train <- read_csv(file_path, show_col_types = FALSE)
+
+head(train)
+```
+
+## 1.2 Structure & Quality Check
+
+```{r inspect-data}
+
+glimpse(train)
+summary(train)
+colSums(is.na(train))
+```
+
+# 2. Data Preparation
+
+## 2.1 Convert Date Column
+
+```{r convert-date}
+
+train <- train %>%
+  mutate(date = as.Date(date))
+
+if (any(is.na(train$date))) {
+  stop("Date conversion produced missing values. Please check the date format.")
+}
+```
+
+## 2.2 Filter to Single Store & Item
+
+```{r filter-series}
+
+train_filtered <- train %>%
+  filter(store == 1, item == 1)
+
+nrow(train_filtered)
+```
+
+## 2.3 Aggregate Daily to Monthly Sales
+
+```{r aggregate-monthly}
+
+monthly_sales <- train_filtered %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(month) %>%
+  summarise(monthly_sales = sum(sales), .groups = "drop")
+
+head(monthly_sales)
+```
+
+## 2.4 Create Time Series Object
+
+```{r create-ts}
+
+sales_ts <- ts(
+  monthly_sales$monthly_sales,
+  start = c(year(min(monthly_sales$month)),
+            month(min(monthly_sales$month))),
+  frequency = 12
+)
+
+sales_ts
+```
+
+## 2.5 Initial Time Series Plot
+
+```{r plot-ts}
+
+autoplot(sales_ts) +
+  ggtitle("Monthly Sales Time Series (Store 1, Item 1)") +
+  xlab("Year") +
+  ylab("Units Sold")
+```
+
+# 3. Exploratory Time Series Analysis
+
+## 3.1 Seasonal Pattern
+
+```{r seasonal-plot}
+
+ggseasonplot(sales_ts, year.labels = TRUE) +
+  ggtitle("Seasonal Pattern of Monthly Sales")
+```
+
+## 3.2 Decomposition
+
+```{r decomposition}
+
+decomp_add <- decompose(sales_ts, type = "additive")
+decomp_mult <- decompose(sales_ts, type = "multiplicative")
+
+autoplot(decomp_add) + ggtitle("Additive Decomposition")
+autoplot(decomp_mult) + ggtitle("Multiplicative Decomposition")
+```
+
+## 3.3 Compare Decomposition Fit
+
+```{r decomposition-sd}
+
+sd(decomp_add$random, na.rm = TRUE)
+sd(decomp_mult$random, na.rm = TRUE)
+```
+
+# 4. Stationarity Testing
+
+## 4.1 ADF Test
+
+```{r adf-test}
+
+adf.test(sales_ts)
+```
+
+## 4.2 KPSS Test
+
+```{r kpss-test}
+
+kpss.test(sales_ts)
+```
+
+## 4.3 Differencing
+
+```{r differencing}
+
+diff_1 <- diff(sales_ts, differences = 1)
+autoplot(diff_1) + ggtitle("First-Order Differencing")
+
+diff_seasonal <- diff(sales_ts, lag = 12)
+autoplot(diff_seasonal) + ggtitle("Seasonal Differencing")
+```
+
+# 5. Model Development
+
+## 5.1 ARIMA Model
+
+```{r fit-arima}
+
+arima_model <- auto.arima(
+  sales_ts,
+  seasonal = TRUE,
+  stepwise = FALSE,
+  approximation = FALSE
+)
+
+summary(arima_model)
+```
+
+## 5.2 Residual Diagnostics
+
+```{r arima-diagnostics}
+
+checkresiduals(arima_model)
+```
+
+## 5.3 ETS Model
+
+```{r fit-ets}
+
+ets_model <- ets(sales_ts)
+summary(ets_model)
+```
+
+## 5.4 Model Comparison
+
+```{r compare-models}
+
+accuracy(arima_model)
+accuracy(ets_model)
+```
+
+# 6. Forecasting
+
+## 6.1 ARIMA Forecast
+
+```{r arima-forecast}
+
+arima_forecast <- forecast(
+  arima_model,
+  h = 6,
+  level = c(80, 95)
+)
+
+autoplot(arima_forecast) +
+  ggtitle("6-Month Forecast (ARIMA)")
+```
+
+## 6.2 ETS Forecast
+
+```{r ets-forecast}
+
+ets_forecast <- forecast(
+  ets_model,
+  h = 6,
+  level = c(80, 95)
+)
+
+autoplot(ets_forecast) +
+  ggtitle("6-Month Forecast (ETS)")
+```
+
+## 6.3 Forecast Table
+
+```{r forecast-table}
+
+forecast_table <- data.frame(
+  Month = time(arima_forecast$mean),
+  Forecast = as.numeric(arima_forecast$mean),
+  Lower_80 = arima_forecast$lower[,1],
+  Upper_80 = arima_forecast$upper[,1],
+  Lower_95 = arima_forecast$lower[,2],
+  Upper_95 = arima_forecast$upper[,2]
+)
+
+forecast_table
+```
+
+# 7. Model Evaluation
+
+## 7.1 Train-Test Split
+
+```{r split-data}
+
+train_ts <- head(sales_ts, length(sales_ts) - 6)
+test_ts  <- tail(sales_ts, 6)
+```
+
+## 7.2 Refit Models
+
+```{r refit-models}
+
+arima_train <- auto.arima(train_ts)
+ets_train   <- ets(train_ts)
+```
+
+## 7.3 Forecast Test Period
+
+```{r forecast-test}
+
+arima_test_forecast <- forecast(arima_train, h = 6)
+ets_test_forecast   <- forecast(ets_train, h = 6)
+```
+
+## 7.4 Accuracy Metrics
+
+```{r evaluate-models}
+
+accuracy(arima_test_forecast, test_ts)
+accuracy(ets_test_forecast, test_ts)
+
+actual <- as.numeric(test_ts)
+
+predicted_arima <- as.numeric(arima_test_forecast$mean)
+mape_arima <- mean(abs((actual - predicted_arima) / actual)) * 100
+rmse_arima <- sqrt(mean((actual - predicted_arima)^2))
+
+predicted_ets <- as.numeric(ets_test_forecast$mean)
+mape_ets <- mean(abs((actual - predicted_ets) / actual)) * 100
+rmse_ets <- sqrt(mean((actual - predicted_ets)^2))
+
+mape_arima
+rmse_arima
+mape_ets
+rmse_ets
+```
