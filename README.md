@@ -18,17 +18,10 @@ I run the analysis from the repository root so the relative dataset path works c
 rmarkdown::render("analysis/case-3-time-series.Rmd")
 ```
 
-The R Markdown file uses these R packages:
-
-- `tidyverse`
-- `lubridate`
-- `forecast`
-- `tseries`
-
-If a package is missing, I install it first:
+I install the R packages first:
 
 ```r
-install.packages(c("tidyverse", "lubridate", "forecast", "tseries"))
+source("requirements.R")
 ```
 
 ## Project Notes
